@@ -31,8 +31,10 @@
 
 package io.grpc.transport.netty;
 
+import static io.netty.handler.codec.http.HttpClientUpgradeHandler.UpgradeEvent.UPGRADE_REJECTED;
+import static io.netty.handler.codec.http.HttpClientUpgradeHandler.UpgradeEvent.UPGRADE_SUCCESSFUL;
+
 import com.google.common.base.Preconditions;
-import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 
 import io.netty.channel.Channel;
@@ -40,15 +42,19 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpClientUpgradeHandler;
+import io.netty.handler.codec.http.HttpClientUpgradeHandler.UpgradeEvent;
 import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http2.Http2ClientUpgradeCodec;
 import io.netty.handler.codec.http2.Http2ConnectionHandler;
 import io.netty.handler.codec.http2.Http2OrHttpChooser;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 
@@ -57,7 +63,9 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Queue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -67,35 +75,16 @@ import javax.net.ssl.SSLEngine;
  * A utility class that provides support methods for negotiating the use of HTTP/2 with the remote
  * endpoint.
  */
-public class Http2Negotiator {
-  private static final List<String> SUPPORTED_PROTOCOLS = Collections.unmodifiableList(
-      Arrays.asList(
-          Http2OrHttpChooser.SelectedProtocol.HTTP_2.protocolName(),
-          "h2-15"));
+public class Http2ChannelInitializer {
+  private static final List<String> SUPPORTED_PROTOCOLS =
+          Collections.unmodifiableList(
+                  Arrays.asList(Http2OrHttpChooser.SelectedProtocol.HTTP_2.protocolName(), "h2-15"));
 
-  // Prefer ALPN to NPN so try it first.
+  // Prefer ALPN to NPN
   private static final String[] JETTY_TLS_NEGOTIATION_IMPL =
       {"org.eclipse.jetty.alpn.ALPN", "org.eclipse.jetty.npn.NextProtoNego"};
 
-  private static final Logger log = Logger.getLogger(Http2Negotiator.class.getName());
-
-  /**
-   * A Netty-based negotiation that provides an pre-configured {@link ChannelInitializer} for to
-   * negotiate the requested protocol.
-   */
-  public interface Negotiation {
-    /**
-     * Gets the {@link ChannelInitializer} for negotiating the protocol.
-     */
-    ChannelInitializer<Channel> initializer();
-
-    void onConnected(Channel channel);
-
-    /**
-     * Completion future for this negotiation.
-     */
-    ListenableFuture<Void> completeFuture();
-  }
+  private static final Logger log = Logger.getLogger(Http2ChannelInitializer.class.getName());
 
   /**
    * Create a TLS handler for HTTP/2 capable of using ALPN/NPN.
@@ -108,10 +97,8 @@ public class Http2Negotiator {
     return new SslHandler(sslEngine, false);
   }
 
-  /**
-   * Creates an TLS negotiation for HTTP/2 using ALPN/NPN.
-   */
-  public static Negotiation tls(final SSLEngine sslEngine, final ChannelHandler... handlers) {
+  public static ChannelInitializer<Channel> tls(final SSLEngine sslEngine,
+                                                final ChannelHandler... handlers) {
     Preconditions.checkArgument(handlers.length > 0, "No handlers were provided");
     Preconditions.checkNotNull(sslEngine, "sslEngine");
 
@@ -119,7 +106,7 @@ public class Http2Negotiator {
     if (!installJettyTLSProtocolSelection(sslEngine, completeFuture, false)) {
       throw new IllegalStateException("NPN/ALPN extensions not installed");
     }
-    final ChannelInitializer<Channel> initializer = new ChannelInitializer<Channel>() {
+    return new ChannelInitializer<Channel>() {
       @Override
       public void initChannel(final Channel ch) throws Exception {
         SslHandler sslHandler = new SslHandler(sslEngine, false);
@@ -135,141 +122,113 @@ public class Http2Negotiator {
               }
             });
         ch.pipeline().addLast(sslHandler);
+        ch.pipeline().addLast(new BufferUntilProtocolNegotiatedHandler());
         ch.pipeline().addLast(handlers);
       }
     };
-
-    return new Negotiation() {
-      @Override
-      public ChannelInitializer<Channel> initializer() {
-        return initializer;
-      }
-
-      @Override
-      public void onConnected(Channel channel) {
-        // Nothing to do.
-      }
-
-      @Override
-      public ListenableFuture<Void> completeFuture() {
-        return completeFuture;
-      }
-    };
   }
 
-  /**
-   * Create a plaintext upgrade negotiation for HTTP/1.1 to HTTP/2.
-   */
-  public static Negotiation plaintextUpgrade(final Http2ConnectionHandler handler) {
-    // Register the plaintext upgrader
-    Http2ClientUpgradeCodec upgradeCodec = new Http2ClientUpgradeCodec(handler);
-    HttpClientCodec httpClientCodec = new HttpClientCodec();
-    final HttpClientUpgradeHandler upgrader =
-        new HttpClientUpgradeHandler(httpClientCodec, upgradeCodec, 1000);
-    final UpgradeCompletionHandler completionHandler = new UpgradeCompletionHandler();
-    final ChannelInitializer<Channel> initializer = new ChannelInitializer<Channel>() {
+  public static ChannelInitializer<Channel> plaintextUpgrade(final Http2ConnectionHandler handler) {
+    return new ChannelInitializer<Channel>() {
       @Override
-      public void initChannel(Channel ch) throws Exception {
-        ch.pipeline().addLast(upgrader);
-        ch.pipeline().addLast(completionHandler);
-      }
-    };
-
-    return new Negotiation() {
-      @Override
-      public ChannelInitializer<Channel> initializer() {
-        return initializer;
-      }
-
-      @Override
-      public ListenableFuture<Void> completeFuture() {
-        return completionHandler.getUpgradeFuture();
-      }
-
-      @Override
-      public void onConnected(Channel channel) {
-        // Trigger the HTTP/1.1 plaintext upgrade protocol by issuing an HTTP request
-        // which causes the upgrade headers to be added
-        DefaultHttpRequest upgradeTrigger =
-            new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/");
-        channel.writeAndFlush(upgradeTrigger);
-      }
-    };
-  }
-
-  /**
-   * Create a "no-op" negotiation that simply assumes the protocol to already be negotiated.
-   */
-  public static Negotiation plaintext(final ChannelHandler handler) {
-    final ChannelInitializer<Channel> initializer = new ChannelInitializer<Channel>() {
-      @Override
-      public void initChannel(Channel ch) throws Exception {
+      public void initChannel(final Channel ch) throws Exception {
+        Http2ClientUpgradeCodec upgradeCodec = new Http2ClientUpgradeCodec(handler);
+        HttpClientCodec httpClientCodec = new HttpClientCodec();
+        ch.pipeline().addLast(new HttpClientUpgradeHandler(httpClientCodec, upgradeCodec, 1000) {
+          @Override
+          public void channelActive(ChannelHandlerContext ctx) {
+            ctx.executor().execute(new Runnable() {
+              @Override
+              public void run() {
+                // Trigger the HTTP/1.1 plaintext upgrade protocol by issuing an HTTP request
+                // which causes the upgrade headers to be added
+                DefaultHttpRequest upgradeTrigger =
+                        new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/");
+                ch.writeAndFlush(upgradeTrigger);
+              }
+            });
+          }
+        });
+        ch.pipeline().addLast(new BufferUntilProtocolNegotiatedHandler());
         ch.pipeline().addLast(handler);
       }
     };
-    return new Negotiation() {
-      private final SettableFuture<Void> completeFuture = SettableFuture.create();
-      @Override
-      public ChannelInitializer<Channel> initializer() {
-        return initializer;
-      }
+  }
 
+  public static ChannelInitializer<Channel> plaintext(final ChannelHandler handler) {
+    return new ChannelInitializer<Channel>() {
       @Override
-      public void onConnected(Channel channel) {
-        completeFuture.set(null);
-      }
+      public void initChannel(Channel ch) throws Exception {
 
-      @Override
-      public ListenableFuture<Void> completeFuture() {
-        return completeFuture;
       }
     };
   }
 
-  /**
-   * Report protocol upgrade completion using a promise.
-   */
-  private static class UpgradeCompletionHandler extends ChannelHandlerAdapter {
-    private final SettableFuture<Void> upgradeFuture = SettableFuture.create();
 
-    public ListenableFuture<Void> getUpgradeFuture() {
-      return upgradeFuture;
+
+  /**
+   * Netty {@link ChannelHandler} that buffers all writes until the TLS handshake or the
+   * HTTP Upgrade is complete. Once the handshake is complete it writes all buffered messages to
+   * the {@link io.netty.channel.ChannelPipeline} in case the handshake was successful or else it
+   * fails the {@link io.netty.channel.ChannelPromise} for each buffered message.
+   * Finally, it removes itself from the pipeline.
+   */
+  private static class BufferUntilProtocolNegotiatedHandler extends ChannelHandlerAdapter {
+    private final List<ChannelWrite> writes = new LinkedList<ChannelWrite>();
+
+    @Override
+    public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+      if (msg instanceof HttpRequest) {
+        ctx.write(msg, promise);
+      } else {
+        writes.add(new ChannelWrite(msg, promise));
+      }
     }
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
-      if (!upgradeFuture.isDone()) {
-        if (evt == HttpClientUpgradeHandler.UpgradeEvent.UPGRADE_REJECTED) {
-          upgradeFuture.setException(new RuntimeException("HTTP/2 upgrade rejected"));
-        } else if (evt == HttpClientUpgradeHandler.UpgradeEvent.UPGRADE_SUCCESSFUL) {
-          upgradeFuture.set(null);
-          ctx.pipeline().remove(this);
+      if (evt instanceof SslHandshakeCompletionEvent) {
+        ctx.pipeline().remove(this);
+        SslHandshakeCompletionEvent handshakeEvent = (SslHandshakeCompletionEvent) evt;
+        if (handshakeEvent.isSuccess()) {
+          flushWrites(ctx.channel());
+        } else {
+          failWrites(handshakeEvent.cause());
         }
+      } else if (evt instanceof UpgradeEvent) {
+        UpgradeEvent upgradeEvent = (UpgradeEvent) evt;
+        if (UPGRADE_SUCCESSFUL.equals(upgradeEvent)) {
+          ctx.pipeline().remove(this);
+          flushWrites(ctx.channel());
+        } else if (UPGRADE_REJECTED.equals(upgradeEvent)) {
+          ctx.pipeline().remove(this);
+          failWrites(new RuntimeException("HTTP Upgrade rejected"));
+        }
+      } else {
+        ctx.fireUserEventTriggered(evt);
       }
     }
 
-    @Override
-    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-      super.channelInactive(ctx);
-      if (!upgradeFuture.isDone()) {
-        upgradeFuture.setException(new RuntimeException("Channel closed before upgrade complete"));
+    private void failWrites(Throwable cause) {
+      for (ChannelWrite write : writes) {
+        write.promise.setFailure(cause);
       }
     }
 
-    @Override
-    public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
-      super.channelUnregistered(ctx);
-      if (!upgradeFuture.isDone()) {
-        upgradeFuture.setException(
-            new RuntimeException("Handler unregistered before upgrade complete"));
+    private void flushWrites(Channel ch) {
+      for (ChannelWrite write : writes) {
+        ch.write(write.msg, write.promise);
       }
+      ch.flush();
     }
 
-    @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-      super.exceptionCaught(ctx, cause);
-      if (!upgradeFuture.isDone()) {
-        upgradeFuture.setException(cause);
+    private static final class ChannelWrite {
+      final Object msg;
+      final ChannelPromise promise;
+
+      ChannelWrite(Object msg, ChannelPromise promise) {
+        this.msg = msg;
+        this.promise = promise;
       }
     }
   }
@@ -297,7 +256,7 @@ public class Http2Negotiator {
         Method putMethod = negoClass.getMethod("put", SSLEngine.class, providerClass);
         final Method removeMethod = negoClass.getMethod("remove", SSLEngine.class);
         putMethod.invoke(null, engine, Proxy.newProxyInstance(
-            Http2Negotiator.class.getClassLoader(),
+            Http2ChannelInitializer.class.getClassLoader(),
             new Class[] {server ? serverProviderClass : clientProviderClass},
             new InvocationHandler() {
               @Override

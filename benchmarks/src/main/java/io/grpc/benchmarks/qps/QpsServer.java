@@ -184,6 +184,7 @@ public class QpsServer {
     @Override
     public void unaryCall(SimpleRequest request,
                           StreamObserver<Qpstest.SimpleResponse> responseObserver) {
+      System.out.println("received" + System.nanoTime());
       if (!request.hasResponseSize()) {
         throw Status.INTERNAL.augmentDescription("responseSize required").asRuntimeException();
       } else if (!request.hasResponseType()) {

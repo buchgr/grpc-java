@@ -102,7 +102,7 @@ class NettyServerTransport extends AbstractService {
     });
 
     if (sslContext != null) {
-      channel.pipeline().addLast(Http2Negotiator.serverTls(sslContext.newEngine(channel.alloc())));
+      channel.pipeline().addLast(Http2ChannelInitializer.serverTls(sslContext.newEngine(channel.alloc())));
     }
     channel.pipeline().addLast(streamRemovalPolicy);
     channel.pipeline().addLast(handler);
