@@ -41,6 +41,7 @@ import io.grpc.transport.ClientStream;
 import io.grpc.transport.ClientStreamListener;
 import io.grpc.transport.ClientTransport;
 import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -68,6 +69,7 @@ import io.netty.handler.codec.http2.Http2InboundFrameLogger;
 import io.netty.handler.codec.http2.Http2OutboundFrameLogger;
 import io.netty.handler.codec.http2.Http2StreamRemovalPolicy;
 import io.netty.handler.ssl.SslContext;
+import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.ImmediateEventExecutor;
@@ -151,11 +153,11 @@ class NettyClientTransport implements ClientTransport {
 
   private static class BufferUntilChannelActiveHandler extends ChannelHandlerAdapter {
     private final Queue<ChannelWrite> writes = new ArrayDeque<ChannelWrite>();
+    boolean inFlush;
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
       writes.add(new ChannelWrite(msg, promise));
-      tryFlush(ctx);
     }
 
     @Override
@@ -164,28 +166,39 @@ class NettyClientTransport implements ClientTransport {
       ctx.fireChannelActive();
     }
 
-    @Override
-    public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
-      tryFlush(ctx);
-      ctx.fireChannelWritabilityChanged();
-    }
+//    @Override
+//    public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+//      tryFlush(ctx);
+//      ctx.fireChannelWritabilityChanged();
+//    }
 
     @Override
     public void flush(ChannelHandlerContext ctx) {
       tryFlush(ctx);
+      //ctx.flush();
     }
 
     private void tryFlush(final ChannelHandlerContext ctx) {
+      if (inFlush) {
+        System.out.println("inFlush");
+        return;
+      }
+      inFlush = true;
       final Channel ch = ctx.channel();
-      if (ch.isActive() && ch.isWritable()) {
-        while (!writes.isEmpty() && ch.isActive() && ch.isWritable()) {
+      if (ch.isActive()) {
+        while (!writes.isEmpty()) {
           ChannelWrite write = writes.remove();
-          ctx.writeAndFlush(write.msg, write.promise);
+          ByteBuf buf = (ByteBuf) write.msg;
+          //System.out.println(buf.toString(CharsetUtil.UTF_8));
+          ctx.write(write.msg, write.promise);
         }
+
 //        if (ch.pipeline().context(this) != null && writes.isEmpty()) {
 //          ch.pipeline().remove(this);
 //        }
       }
+      ctx.flush();
+      inFlush = false;
     }
 
     private static final class ChannelWrite {
@@ -213,8 +226,8 @@ class NettyClientTransport implements ClientTransport {
     b.handler(new ChannelInitializer<Channel>() {
       @Override
       protected void initChannel(Channel ch) throws Exception {
-        ch.pipeline().addLast(handler);
         ch.pipeline().addLast(new BufferUntilChannelActiveHandler());
+        ch.pipeline().addLast(handler);
 
         ((Promise)registrationFuture).trySuccess(null);
       }
@@ -252,6 +265,8 @@ class NettyClientTransport implements ClientTransport {
         }
       }
     });
+
+    //connectFuture.awaitUninterruptibly();
 
     registrationFuture.awaitUninterruptibly();
   }
