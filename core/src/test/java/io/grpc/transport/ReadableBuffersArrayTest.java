@@ -32,7 +32,7 @@
 package io.grpc.transport;
 
 import static com.google.common.base.Charsets.UTF_8;
-import static io.grpc.transport.Buffers.wrap;
+import static io.grpc.transport.ReadableBuffers.wrap;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -40,14 +40,14 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 /**
- * Tests for the array-backed {@link Buffer} returned by {@link Buffers#wrap(byte[], int, int)};
+ * Tests for the array-backed {@link ReadableBuffer} returned by {@link ReadableBuffers#wrap(byte[], int, int)};
  */
-public class BuffersArrayTest extends BufferTestBase {
+public class ReadableBuffersArrayTest extends BufferTestBase {
 
   @Test
   public void bufferShouldExposeArray() {
     byte[] array = msg.getBytes(UTF_8);
-    Buffer buffer = wrap(array, 1, msg.length() - 1);
+    ReadableBuffer buffer = wrap(array, 1, msg.length() - 1);
     assertTrue(buffer.hasArray());
     assertSame(array, buffer.array());
     assertEquals(1, buffer.arrayOffset());
@@ -58,7 +58,7 @@ public class BuffersArrayTest extends BufferTestBase {
   }
 
   @Override
-  protected Buffer buffer() {
-    return Buffers.wrap(msg.getBytes(UTF_8), 0, msg.length());
+  protected ReadableBuffer buffer() {
+    return ReadableBuffers.wrap(msg.getBytes(UTF_8), 0, msg.length());
   }
 }

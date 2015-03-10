@@ -147,7 +147,7 @@ public class MessageDeframerTest {
   public void largerFrameSize() {
     deframer.request(1);
     deframer.deframe(
-        Buffers.wrap(Bytes.concat(new byte[] {0, 0, 0, 3, (byte) 232}, new byte[1000])), false);
+        ReadableBuffers.wrap(Bytes.concat(new byte[]{0, 0, 0, 3, (byte) 232}, new byte[1000])), false);
     verify(listener).messageRead(messages.capture());
     assertEquals(Bytes.asList(new byte[1000]), bytes(messages));
     verify(listener, atLeastOnce()).bytesRead(anyInt());
@@ -194,8 +194,8 @@ public class MessageDeframerTest {
     }
   }
 
-  private static Buffer buffer(byte[] bytes) {
-    return Buffers.wrap(bytes);
+  private static ReadableBuffer buffer(byte[] bytes) {
+    return ReadableBuffers.wrap(bytes);
   }
 
   private static byte[] compress(byte[] bytes) {

@@ -36,12 +36,12 @@ import static com.google.common.base.Charsets.UTF_8;
 import java.nio.ByteBuffer;
 
 /**
- * Tests for the array-backed {@link Buffer} returned by {@link Buffers#wrap(ByteBuffer)}.
+ * Tests for the array-backed {@link ReadableBuffer} returned by {@link ReadableBuffers#wrap(ByteBuffer)}.
  */
-public class BuffersByteBufferTest extends BufferTestBase {
+public class ReadableBuffersByteReadableBufferTest extends BufferTestBase {
 
   @Override
-  protected Buffer buffer() {
-    return Buffers.wrap(ByteBuffer.wrap(msg.getBytes(UTF_8)));
+  protected ReadableBuffer buffer() {
+    return ReadableBuffers.wrap(ByteBuffer.wrap(msg.getBytes(UTF_8)));
   }
 }

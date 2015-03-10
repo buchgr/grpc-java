@@ -52,14 +52,14 @@ public class MessageFramer {
   /**
    * Sink implemented by the transport layer to receive frames and forward them to their destination
    */
-  public interface Sink<T> {
+  public interface Sink {
     /**
      * Delivers a frame via the transport.
      *
      * @param frame the contents of the frame to deliver
      * @param endOfStream whether the frame is the last one for the GRPC stream
      */
-    public void deliverFrame(T frame, boolean endOfStream);
+    void deliverFrame(WritableBuffer frame, boolean endOfStream);
   }
 
   private static final int HEADER_LENGTH = 5;
@@ -70,33 +70,34 @@ public class MessageFramer {
     NONE, GZIP;
   }
 
-  private final Sink<ByteBuffer> sink;
-  private ByteBuffer bytebuf;
+  private final Sink sink;
   private final Compression compression;
   private final OutputStreamAdapter outputStreamAdapter = new OutputStreamAdapter();
   private final byte[] headerScratch = new byte[HEADER_LENGTH];
-
+  private final WritableBufferAllocator allocator;
+  private final int maxFrameSize;
+  private WritableBuffer buffer;
+  private boolean closed;
   /**
    * Creates a {@code MessageFramer} without compression.
    *
    * @param sink the sink used to deliver frames to the transport
-   * @param maxFrameSize the maximum frame size that this framer will deliver
    */
-  public MessageFramer(Sink<ByteBuffer> sink, int maxFrameSize) {
-    this(sink, maxFrameSize, Compression.NONE);
+  public MessageFramer(Sink sink, int maxFrameSize, WritableBufferAllocator allocator) {
+    this(sink, maxFrameSize, allocator, Compression.NONE);
   }
 
   /**
    * Creates a {@code MessageFramer}.
    *
    * @param sink the sink used to deliver frames to the transport
-   * @param maxFrameSize the maximum frame size that this framer will deliver
    * @param compression the compression type
    */
-  public MessageFramer(Sink<ByteBuffer> sink, int maxFrameSize, Compression compression) {
+  public MessageFramer(Sink sink, int maxFrameSize, WritableBufferAllocator allocator, Compression compression) {
     this.sink = Preconditions.checkNotNull(sink, "sink");
-    this.bytebuf = ByteBuffer.allocate(maxFrameSize);
+    this.allocator = Preconditions.checkNotNull(allocator, "allocator");
     this.compression = Preconditions.checkNotNull(compression, "compression");
+    this.maxFrameSize = maxFrameSize;
   }
 
   /**
@@ -108,17 +109,19 @@ public class MessageFramer {
    */
   public void writePayload(InputStream message, int messageLength) {
     try {
-      if (compression == Compression.NONE) {
-        writeFrame(message, messageLength, false);
-      } else if (compression != Compression.GZIP) {
-        throw new AssertionError("Unknown compression type");
-      } else {
-        // compression == GZIP
-        DirectAccessByteArrayOutputStream out = new DirectAccessByteArrayOutputStream();
-        gzipCompressTo(message, messageLength, out);
-        InputStream compressedMessage =
-            new DeferredByteArrayInputStream(out.getBuf(), 0, out.getCount());
-        writeFrame(compressedMessage, out.getCount(), true);
+      switch(compression) {
+        case NONE:
+          writeFrame(message, messageLength, false);
+          break;
+        case GZIP:
+          DirectAccessByteArrayOutputStream out = new DirectAccessByteArrayOutputStream();
+          gzipCompressTo(message, messageLength, out);
+          InputStream compressedMessage =
+                  new DeferredByteArrayInputStream(out.getBuf(), 0, out.getCount());
+          writeFrame(compressedMessage, out.getCount(), true);
+          break;
+        default:
+          throw new AssertionError("Unknown compression type");
       }
     } catch (IOException ex) {
       throw new RuntimeException(ex);
@@ -167,11 +170,15 @@ public class MessageFramer {
 
   private void writeRaw(byte[] b, int off, int len) {
     while (len > 0) {
-      if (bytebuf.remaining() == 0) {
+      if (buffer != null && buffer.remaining() == 0) {
         commitToSink(false);
       }
-      int toWrite = Math.min(len, bytebuf.remaining());
-      bytebuf.put(b, off, toWrite);
+      if (buffer == null) {
+        buffer = allocator.buffer(maxFrameSize);
+      }
+
+      int toWrite = Math.min(len, buffer.remaining());
+      buffer.write(b, off, toWrite);
       off += toWrite;
       len -= toWrite;
     }
@@ -181,10 +188,9 @@ public class MessageFramer {
    * Flushes any buffered data in the framer to the sink.
    */
   public void flush() {
-    if (bytebuf.position() == 0) {
-      return;
+    if (buffer != null) {
+      commitToSink(false);
     }
-    commitToSink(false);
   }
 
   /**
@@ -192,7 +198,7 @@ public class MessageFramer {
    * {@link #close()} or {@link #dispose()}.
    */
   public boolean isClosed() {
-    return bytebuf == null;
+    return closed;
   }
 
   /**
@@ -202,7 +208,7 @@ public class MessageFramer {
   public void close() {
     if (!isClosed()) {
       commitToSink(true);
-      dispose();
+      closed = true;
     }
   }
 
@@ -211,14 +217,19 @@ public class MessageFramer {
    * closed or disposed, additional calls to this method will have no affect.
    */
   public void dispose() {
-    // TODO(louiscryan): Returning buffer to a pool would go here
-    bytebuf = null;
+    closed = true;
+    if (buffer != null) {
+      buffer.dispose();
+      buffer = null;
+    }
   }
 
   private void commitToSink(boolean endOfStream) {
-    bytebuf.flip();
-    sink.deliverFrame(bytebuf, endOfStream);
-    bytebuf.clear();
+    if (buffer == null) {
+      buffer = allocator.buffer(0);
+    }
+    sink.deliverFrame(buffer, endOfStream);
+    buffer = null;
   }
 
   private void verifyNotClosed() {

@@ -153,7 +153,7 @@ public abstract class AbstractTransportTest {
     assertEquals(goldenResponse, blockingStub.unaryCall(request));
   }
 
-  @Test(timeout = 10000)
+  @Test
   public void serverStreaming() throws Exception {
     final StreamingOutputCallRequest request = StreamingOutputCallRequest.newBuilder()
         .setResponseType(PayloadType.COMPRESSABLE)
@@ -228,7 +228,7 @@ public abstract class AbstractTransportTest {
     assertEquals(goldenResponse, responseObserver.firstValue().get());
   }
 
-  @Test(timeout = 10000)
+  @Test()
   public void pingPong() throws Exception {
     final List<StreamingOutputCallRequest> requests = Arrays.asList(
         StreamingOutputCallRequest.newBuilder()

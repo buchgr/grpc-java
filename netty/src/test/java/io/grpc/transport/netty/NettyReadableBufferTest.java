@@ -29,62 +29,47 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package io.grpc.transport;
+package io.grpc.transport.netty;
+
+import static com.google.common.base.Charsets.UTF_8;
+import static org.junit.Assert.assertEquals;
+
+import io.grpc.transport.ReadableBuffer;
+import io.grpc.transport.BufferTestBase;
+import io.netty.buffer.Unpooled;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 /**
- * Abstract base class for {@link Buffer} implementations.
+ * Tests for {@link NettyReadableBuffer}.
  */
-public abstract class AbstractBuffer implements Buffer {
+@RunWith(JUnit4.class)
+public class NettyReadableBufferTest extends BufferTestBase {
+  private NettyReadableBuffer buffer;
 
-  @Override
-  public final int readUnsignedMedium() {
-    checkReadable(3);
-    int b1 = readUnsignedByte();
-    int b2 = readUnsignedByte();
-    int b3 = readUnsignedByte();
-    return b1 << 16 | b2 << 8 | b3;
+  @Before
+  public void setup() {
+    buffer = new NettyReadableBuffer(Unpooled.copiedBuffer(msg, UTF_8));
   }
 
-
-  @Override
-  public final int readUnsignedShort() {
-    checkReadable(2);
-    int b1 = readUnsignedByte();
-    int b2 = readUnsignedByte();
-    return b1 << 8 | b2;
+  @Test
+  public void closeShouldReleaseBuffer() {
+    buffer.close();
+    assertEquals(0, buffer.buffer().refCnt());
   }
 
-  @Override
-  public final int readInt() {
-    checkReadable(4);
-    int b1 = readUnsignedByte();
-    int b2 = readUnsignedByte();
-    int b3 = readUnsignedByte();
-    int b4 = readUnsignedByte();
-    return (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
+  @Test
+  public void closeMultipleTimesShouldReleaseBufferOnce() {
+    buffer.close();
+    buffer.close();
+    assertEquals(0, buffer.buffer().refCnt());
   }
 
   @Override
-  public boolean hasArray() {
-    return false;
-  }
-
-  @Override
-  public byte[] array() {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
-  public int arrayOffset() {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
-  public void close() {}
-
-  protected final void checkReadable(int length) {
-    if (readableBytes() < length) {
-      throw new IndexOutOfBoundsException();
-    }
+  protected ReadableBuffer buffer() {
+    return buffer;
   }
 }

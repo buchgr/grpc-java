@@ -35,11 +35,11 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import io.grpc.Metadata;
 import io.grpc.transport.AbstractServerStream;
+import io.grpc.transport.WritableBuffer;
+import io.grpc.transport.WritableBufferAllocator;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.handler.codec.http2.Http2Headers;
-
-import java.nio.ByteBuffer;
 
 /**
  * Server stream for a Netty HTTP2 transport
@@ -48,15 +48,17 @@ class NettyServerStream extends AbstractServerStream<Integer> {
 
   private final Channel channel;
   private final NettyServerHandler handler;
+  private NettyWritableBufferAllocator allocator;
 
   NettyServerStream(Channel channel, int id, NettyServerHandler handler) {
     super(id);
     this.channel = checkNotNull(channel, "channel");
+    allocator.allocator(channel.alloc());
     this.handler = checkNotNull(handler, "handler");
   }
 
   void inboundDataReceived(ByteBuf frame, boolean endOfStream) {
-    super.inboundDataReceived(new NettyBuffer(frame.retain()), endOfStream);
+    inboundDataReceived(new NettyReadableBuffer(frame.retain()), endOfStream);
   }
 
   @Override
@@ -67,6 +69,12 @@ class NettyServerStream extends AbstractServerStream<Integer> {
         requestMessagesFromDeframer(numMessages);
       }
     });
+  }
+
+  @Override
+  protected WritableBufferAllocator writeBufferAllocator() {
+    allocator = new NettyWritableBufferAllocator();
+    return allocator;
   }
 
   @Override
@@ -81,10 +89,9 @@ class NettyServerStream extends AbstractServerStream<Integer> {
   }
 
   @Override
-  protected void sendFrame(ByteBuffer frame, boolean endOfStream) {
-    SendGrpcFrameCommand cmd =
-        new SendGrpcFrameCommand(this, Utils.toByteBuf(channel.alloc(), frame), endOfStream);
-    channel.writeAndFlush(cmd);
+  protected void sendFrame(WritableBuffer frame, boolean endOfStream) {
+    ByteBuf bytebuf = ((NettyWritableBuffer) frame).bytebuf();
+    channel.writeAndFlush(new SendGrpcFrameCommand(this, bytebuf, endOfStream));
   }
 
   @Override

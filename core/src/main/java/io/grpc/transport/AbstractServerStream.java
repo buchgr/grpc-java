@@ -37,7 +37,6 @@ import io.grpc.Metadata;
 import io.grpc.Status;
 
 import java.io.InputStream;
-import java.nio.ByteBuffer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -125,7 +124,7 @@ public abstract class AbstractServerStream<IdT> extends AbstractStream<IdT>
    *              be retained.
    * @param endOfStream {@code true} if no more data will be received on the stream.
    */
-  public void inboundDataReceived(Buffer frame, boolean endOfStream) {
+  public void inboundDataReceived(ReadableBuffer frame, boolean endOfStream) {
     if (inboundPhase() == Phase.STATUS) {
       frame.close();
       return;
@@ -142,8 +141,8 @@ public abstract class AbstractServerStream<IdT> extends AbstractStream<IdT>
   }
 
   @Override
-  protected final void internalSendFrame(ByteBuffer frame, boolean endOfStream) {
-    if (frame.hasRemaining()) {
+  protected final void internalSendFrame(WritableBuffer frame, boolean endOfStream) {
+    if (frame.remaining() > 0) {
       sendFrame(frame, false);
     }
     if (endOfStream) {
@@ -167,7 +166,7 @@ public abstract class AbstractServerStream<IdT> extends AbstractStream<IdT>
    * @param endOfStream if {@code true} indicates that no more data will be sent on the stream by
    *        this endpoint.
    */
-  protected abstract void sendFrame(ByteBuffer frame, boolean endOfStream);
+  protected abstract void sendFrame(WritableBuffer frame, boolean endOfStream);
 
   /**
    * Sends trailers to the remote end point. This call implies end of stream.

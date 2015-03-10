@@ -1,5 +1,5 @@
 /*
- * Copyright 2014, Google Inc. All rights reserved.
+ * Copyright 2015, Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -28,63 +28,35 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+package io.grpc.transport.netty;
 
-package io.grpc.transport;
+import io.grpc.transport.WritableBuffer;
+import io.netty.buffer.ByteBuf;
 
-import static org.junit.Assert.assertEquals;
-import static org.mockito.Mockito.when;
+class NettyWritableBuffer implements WritableBuffer {
 
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.mockito.stubbing.OngoingStubbing;
+  private final ByteBuf bytebuf;
 
-/**
- * Tests for {@link AbstractBuffer}.
- */
-@RunWith(JUnit4.class)
-public class AbstractBufferTest {
-
-  @Mock
-  private AbstractBuffer buffer;
-
-  @Before
-  public void setup() {
-    MockitoAnnotations.initMocks(this);
+  NettyWritableBuffer(ByteBuf bytebuf) {
+    this.bytebuf = bytebuf;
   }
 
-  @Test
-  public void readUnsignedShortShouldSucceed() {
-    mockBytes(0xFF, 0xEE);
-    assertEquals(0xFFEE, buffer.readUnsignedShort());
+  @Override
+  public void write(byte[] bytes, int offset, int length) {
+    bytebuf.writeBytes(bytes, offset, length);
   }
 
-  @Test
-  public void readUnsignedMediumShouldSucceed() {
-    mockBytes(0xFF, 0xEE, 0xDD);
-    assertEquals(0xFFEEDD, buffer.readUnsignedMedium());
+  @Override
+  public int remaining() {
+    return bytebuf.writableBytes();
   }
 
-  @Test
-  public void readPositiveIntShouldSucceed() {
-    mockBytes(0x7F, 0xEE, 0xDD, 0xCC);
-    assertEquals(0x7FEEDDCC, buffer.readInt());
+  @Override
+  public void dispose() {
+    bytebuf.release();
   }
 
-  @Test
-  public void readNegativeIntShouldSucceed() {
-    mockBytes(0xFF, 0xEE, 0xDD, 0xCC);
-    assertEquals(0xFFEEDDCC, buffer.readInt());
-  }
-
-  private void mockBytes(int... bytes) {
-    when(buffer.readableBytes()).thenReturn(bytes.length);
-    OngoingStubbing<Integer> stub = when(buffer.readUnsignedByte());
-    for (int b : bytes) {
-      stub = stub.thenReturn(b);
-    }
+  ByteBuf bytebuf() {
+    return bytebuf;
   }
 }

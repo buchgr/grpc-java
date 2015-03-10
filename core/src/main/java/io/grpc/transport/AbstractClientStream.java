@@ -38,7 +38,6 @@ import io.grpc.Metadata;
 import io.grpc.Status;
 
 import java.io.InputStream;
-import java.nio.ByteBuffer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -127,7 +126,7 @@ public abstract class AbstractClientStream<IdT> extends AbstractStream<IdT>
    * @param frame the received data frame. Its ownership is transferred to this method.
    * @param 
    */
-  protected void inboundDataReceived(Buffer frame) {
+  protected void inboundDataReceived(ReadableBuffer frame) {
     Preconditions.checkNotNull(frame, "frame");
     boolean needToCloseFrame = true;
     try {
@@ -178,7 +177,7 @@ public abstract class AbstractClientStream<IdT> extends AbstractStream<IdT>
     // remoteEndClosed
     this.status = status;
     this.trailers = trailers;
-    deframe(Buffers.empty(), true);
+    deframe(ReadableBuffers.empty(), true);
   }
 
   @Override
@@ -187,7 +186,7 @@ public abstract class AbstractClientStream<IdT> extends AbstractStream<IdT>
   }
 
   @Override
-  protected final void internalSendFrame(ByteBuffer frame, boolean endOfStream) {
+  protected final void internalSendFrame(WritableBuffer frame, boolean endOfStream) {
     sendFrame(frame, endOfStream);
   }
 
@@ -198,7 +197,7 @@ public abstract class AbstractClientStream<IdT> extends AbstractStream<IdT>
    * @param endOfStream if {@code true} indicates that no more data will be sent on the stream by
    *        this endpoint.
    */
-  protected abstract void sendFrame(ByteBuffer frame, boolean endOfStream);
+  protected abstract void sendFrame(WritableBuffer frame, boolean endOfStream);
 
   /**
    * Report stream closure with status to the application layer if not already reported. This method
