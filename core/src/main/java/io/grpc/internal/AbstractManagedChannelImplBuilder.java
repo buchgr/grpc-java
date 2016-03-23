@@ -100,7 +100,7 @@ public abstract class AbstractManagedChannelImplBuilder
   }
 
   protected AbstractManagedChannelImplBuilder(SocketAddress directServerAddress, String authority) {
-    this.target = DIRECT_ADDRESS_SCHEME + ":///" + directServerAddress;
+    this.target = DIRECT_ADDRESS_SCHEME + "://" + directServerAddress;
     this.directServerAddress = directServerAddress;
     this.nameResolverFactory = new DirectAddressNameResolverFactory(directServerAddress, authority);
   }
