@@ -33,44 +33,51 @@ package io.grpc.netty;
 
 import io.grpc.internal.WritableBuffer;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.Unpooled;
 
 /**
  * The {@link WritableBuffer} used by the Netty transport.
  */
 class NettyWritableBuffer implements WritableBuffer {
 
-  private final ByteBuf bytebuf;
+  private final CompositeByteBuf composite;
+  private final int maxCapacity;
 
-  NettyWritableBuffer(ByteBuf bytebuf) {
-    this.bytebuf = bytebuf;
+  NettyWritableBuffer(CompositeByteBuf composite, int maxCapacity) {
+    this.composite = composite;
+    this.maxCapacity = maxCapacity;
   }
 
   @Override
   public void write(byte[] src, int srcIndex, int length) {
-    bytebuf.writeBytes(src, srcIndex, length);
+    if (srcIndex < 0) {
+      throw new IndexOutOfBoundsException("foo");
+    }
+    composite.addComponent(true, Unpooled.wrappedBuffer(src, srcIndex, length));
   }
 
   @Override
   public void write(byte b) {
-    bytebuf.writeByte(b);
+    composite.addComponent(true, composite.alloc().buffer(1,1).writeByte(b));
   }
 
   @Override
   public int writableBytes() {
-    return bytebuf.writableBytes();
+    return maxCapacity - composite.readableBytes();
   }
 
   @Override
   public int readableBytes() {
-    return bytebuf.readableBytes();
+    return composite.readableBytes();
   }
 
   @Override
   public void release() {
-    bytebuf.release();
+    composite.release();
   }
 
   ByteBuf bytebuf() {
-    return bytebuf;
+    return composite;
   }
 }

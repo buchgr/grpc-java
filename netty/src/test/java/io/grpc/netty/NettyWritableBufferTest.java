@@ -33,7 +33,8 @@ package io.grpc.netty;
 
 import io.grpc.internal.WritableBuffer;
 import io.grpc.internal.WritableBufferTestBase;
-import io.netty.buffer.Unpooled;
+import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 
 import org.junit.After;
 import org.junit.Before;
@@ -52,7 +53,8 @@ public class NettyWritableBufferTest extends WritableBufferTestBase {
 
   @Before
   public void setup() {
-    buffer = new NettyWritableBuffer(Unpooled.buffer(100));
+    CompositeByteBuf composite = new CompositeByteBuf(PooledByteBufAllocator.DEFAULT, true, 1000);
+    buffer = new NettyWritableBuffer(composite, 100);
   }
 
   @After
@@ -67,8 +69,8 @@ public class NettyWritableBufferTest extends WritableBufferTestBase {
 
   @Override
   protected byte[] writtenBytes() {
-    byte[] b = buffer.bytebuf().array();
-    int fromIdx = buffer.bytebuf().arrayOffset();
-    return Arrays.copyOfRange(b, fromIdx, buffer.readableBytes());
+    byte[] data = new byte[buffer.readableBytes()];
+    buffer.bytebuf().getBytes(0, data);
+    return data;
   }
 }
