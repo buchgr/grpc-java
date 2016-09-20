@@ -39,6 +39,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import com.google.protobuf.Parser;
 
+import io.grpc.ArrayHolder;
 import io.grpc.ExperimentalApi;
 import io.grpc.KnownLength;
 import io.grpc.Metadata;
@@ -126,7 +127,15 @@ public class ProtoLiteUtils {
         }
         CodedInputStream cis = null;
         try {
-          if (stream instanceof KnownLength) {
+          if (stream instanceof ArrayHolder) {
+            ArrayHolder holder = (ArrayHolder) stream;
+            int size = holder.length();
+            if (size > 0 && size <= GrpcUtil.DEFAULT_MAX_MESSAGE_SIZE) {
+              cis = CodedInputStream.newInstance(holder.array(), holder.offset(), holder.length());
+            } else {
+              return defaultInstance;
+            }
+          } else if (stream instanceof KnownLength) {
             int size = stream.available();
             if (size > 0 && size <= GrpcUtil.DEFAULT_MAX_MESSAGE_SIZE) {
               byte[] buf = new byte[size];

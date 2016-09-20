@@ -39,6 +39,7 @@ import io.grpc.Status;
 import io.grpc.internal.AbstractServerStream;
 import io.grpc.internal.WritableBuffer;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -163,7 +164,16 @@ class NettyServerStream extends AbstractServerStream {
     }
 
     void inboundDataReceived(ByteBuf frame, boolean endOfStream) {
-      super.inboundDataReceived(new NettyReadableBuffer(frame.retain()), endOfStream);
+      final ByteBuf newFrame;
+      if (frame.readableBytes() > 0) {
+        ByteBuf heapFrame = PooledByteBufAllocator.DEFAULT
+            .heapBuffer(frame.readableBytes(), frame.readableBytes());
+        heapFrame.writeBytes(frame);
+        newFrame = heapFrame;
+      } else {
+        newFrame = frame.retain();
+      }
+      super.inboundDataReceived(new NettyReadableBuffer(newFrame), endOfStream);
     }
 
     @Override

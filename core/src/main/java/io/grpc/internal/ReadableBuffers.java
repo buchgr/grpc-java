@@ -35,6 +35,7 @@ import static com.google.common.base.Charsets.UTF_8;
 
 import com.google.common.base.Preconditions;
 
+import io.grpc.ArrayHolder;
 import io.grpc.KnownLength;
 
 import java.io.IOException;
@@ -119,7 +120,9 @@ public final class ReadableBuffers {
    * @param owner if {@code true}, the returned stream will close the buffer when closed.
    */
   public static InputStream openStream(ReadableBuffer buffer, boolean owner) {
-    return new BufferInputStream(owner ? buffer : ignoreClose(buffer));
+    return buffer.hasArray()
+          ? new ArrayBackedInputStream(owner ? buffer : ignoreClose(buffer))
+          : new BufferInputStream(owner ? buffer : ignoreClose(buffer));
   }
 
   /**
@@ -309,10 +312,33 @@ public final class ReadableBuffers {
     }
   }
 
+  private static final class ArrayBackedInputStream extends BufferInputStream
+      implements ArrayHolder {
+
+    ArrayBackedInputStream(ReadableBuffer buffer) {
+      super(buffer);
+    }
+
+    @Override
+    public int offset() {
+      return buffer.arrayOffset();
+    }
+
+    @Override
+    public int length() {
+      return buffer.readableBytes();
+    }
+
+    @Override
+    public byte[] array() {
+      return buffer.array();
+    }
+  }
+
   /**
    * An {@link InputStream} that is backed by a {@link ReadableBuffer}.
    */
-  private static final class BufferInputStream extends InputStream implements KnownLength {
+  private static class BufferInputStream extends InputStream implements KnownLength {
     final ReadableBuffer buffer;
 
     public BufferInputStream(ReadableBuffer buffer) {
