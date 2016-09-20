@@ -50,6 +50,21 @@ public class CompositeReadableBuffer extends AbstractReadableBuffer {
   private int readableBytes;
   private final Queue<ReadableBuffer> buffers = new ArrayDeque<ReadableBuffer>();
 
+  @Override
+  public boolean hasArray() {
+    return buffers.size() == 1 && buffers.peek().hasArray();
+  }
+
+  @Override
+  public byte[] array() {
+    return buffers.peek().array();
+  }
+
+  @Override
+  public int arrayOffset() {
+    return buffers.peek().arrayOffset();
+  }
+
   /**
    * Adds a new {@link ReadableBuffer} at the end of the buffer list. After a buffer is added, it is
    * expected that this {@code CompositeBuffer} has complete ownership. Any attempt to modify the
