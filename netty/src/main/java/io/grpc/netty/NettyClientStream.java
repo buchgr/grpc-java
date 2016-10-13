@@ -139,12 +139,17 @@ abstract class NettyClientStream extends Http2ClientStream implements StreamIdHo
   protected abstract Status statusFromFailedFuture(ChannelFuture f);
 
   @Override
-  public void request(int numMessages) {
+  public void request(final int numMessages) {
     if (channel.eventLoop().inEventLoop()) {
       // Processing data read in the event loop so can call into the deframer immediately
       requestMessagesFromDeframer(numMessages);
     } else {
-      writeQueue.enqueue(new RequestMessagesCommand(this, numMessages), true);
+      channel.eventLoop().execute(new Runnable() {
+        @Override
+        public void run() {
+          requestMessagesFromDeframer(numMessages);
+        }
+      });
     }
   }
 
